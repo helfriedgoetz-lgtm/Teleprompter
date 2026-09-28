@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Teleprompter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #14181d;
+    --panel-2: #1b2027;
+    --line: #2a313a;
+    --text: #eceff3;
+    --muted: #8a94a3;
+    --read: #4b5462;
+    --accent: #5cc8e8;
+    --dir: #f5b841;
+    --danger: #ff7a6b;
+    --ok: #6fdc9a;
+    --ui: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --prompt: "Atkinson Hyperlegible", "Helvetica Neue", Arial, sans-serif;
+    --fs: 56px;
+    --lh: 1.45;
+    --readline: 30%;
+    --width: 80%;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); font: 15px/1.5 var(--ui);
+    -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, label.file:focus-within {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  /* ---------- Einrichtung ---------- */
+  #setup {
+    min-height: 100%; padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+    display: grid; justify-content: center;
+  }
+  .wrap { width: min(960px, 100%); display: grid; gap: 20px; }
+  header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header.top h1 { margin: 0; font: 700 28px/1.1 var(--prompt); letter-spacing: .01em; }
+  header.top h1 span { color: var(--accent); }
+  header.top p { margin: 0; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+  .card h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  textarea#text {
+    width: 100%; min-height: 380px; resize: vertical; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; font: 16px/1.6 var(--prompt);
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px;
+    padding: 9px 14px; cursor: pointer; font-weight: 500; line-height: 1.2;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); color: #06232d; border-color: var(--accent); font-weight: 600; }
+  .btn.big { padding: 14px 20px; font-size: 17px; width: 100%; }
+  label.file { position: relative; overflow: hidden; }
+  label.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .field { display: grid; gap: 6px; }
+  .field label { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; }
+  .field output { color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  .check { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 18px; height: 18px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .hint code, .legend code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12.5px; }
+  .dirSample { color: var(--dir); font-style: italic; }
+  .legend { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  #support { font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+  #support.bad { border-color: var(--danger); color: var(--danger); }
+  #support.good { color: var(--ok); }
+
+  /* ---------- Prompter ---------- */
+  #prompter { position: fixed; inset: 0; background: #000; overflow: hidden; }
+  #stage { position: absolute; inset: 0; overflow: hidden; }
+  #stage.mirror { transform: scaleX(-1); }
+  #stage.flip { transform: scaleY(-1); }
+  #stage.mirror.flip { transform: scale(-1, -1); }
+  #scroller {
+    position: relative; width: var(--width); margin: 0 auto; will-change: transform;
+    font: 400 min(var(--fs), 11vw)/var(--lh) var(--prompt); color: var(--text);
+    hyphens: auto; -webkit-hyphens: auto; overflow-wrap: break-word;
+    padding-bottom: 100vh;
+  }
+  #scroller p { margin: 0 0 .7em; }
+  .w { transition: color .25s; border-radius: .12em; cursor: pointer; }
+  .w.read { color: var(--read); }
+  .w.cur { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 .08em 0 var(--accent); }
+  .dir {
+    color: var(--dir); font-style: italic; font-size: .62em; font-weight: 400;
+    vertical-align: .12em; letter-spacing: .01em; white-space: normal;
+  }
+  p.dirblock { text-align: center; }
+  p.dirblock .dir { font-size: .55em; }
+  .shade { position: absolute; left: 0; right: 0; pointer-events: none; }
+  .shade.top { top: 0; height: 18%; background: linear-gradient(#000, transparent); }
+  .shade.bot { bottom: 0; height: 22%; background: linear-gradient(transparent, #000); }
+  #marker {
+    position: absolute; left: 0; right: 0; top: var(--readline); height: 0; pointer-events: none;
+    border-top: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  #marker::before, #marker::after {
+    content: ""; position: absolute; top: -12px; border: 12px solid transparent;
+  }
+  #marker::before { left: 6px; border-left: 16px solid var(--accent); }
+  #marker::after { right: 6px; border-right: 16px solid var(--accent); }
+
+  #bar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+    padding: 10px max(12px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+    background: color-mix(in srgb, var(--panel) 92%, transparent); border-top: 1px solid var(--line);
+    transition: opacity .4s, transform .4s;
+  }
+  #bar.hide { opacity: 0; transform: translateY(100%); pointer-events: none; }
+  #bar .btn { padding: 8px 12px; }
+  #micBtn.on { background: var(--danger); border-color: var(--danger); color: #2a0703; font-weight: 600; }
+  .stat { display: flex; gap: 14px; align-items: center; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; padding: 0 6px; }
+  .stat b { color: var(--text); font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--read); display: inline-block; margin-right: 6px; }
+  .dot.live { background: var(--danger); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #heard {
+    position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 5;
+    max-width: 90%; padding: 4px 12px; border-radius: 20px; background: rgba(20,24,29,.8); color: var(--muted);
+    font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  }
+  #clock {
+    position: absolute; top: calc(10px + env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); z-index: 5;
+    padding: 4px 12px; border-radius: 8px; background: rgba(20,24,29,.8); border: 1px solid var(--line);
+    font: 600 26px/1.2 var(--ui); font-variant-numeric: tabular-nums; color: var(--muted); pointer-events: none;
+  }
+  #clock.live { color: var(--text); }
+  #clock.mirror { transform: scaleX(-1); }
+  #toast {
+    position: absolute; top: 20%; left: 50%; transform: translateX(-50%); z-index: 6; padding: 12px 18px;
+    background: var(--panel-2); border: 1px solid var(--danger); color: var(--text); border-radius: 10px; max-width: 90%;
+  }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } .w { transition: none; } }
+</style>
+</head>
+<body>
+
+<!-- ============ Einrichtung ============ -->
+<section id="setup">
+  <div class="wrap">
+    <header class="top">
+      <h1>Tele<span>prompter</span></h1>
+      <p>Der Text läuft nur weiter, wenn Sie ihn vorgelesen haben.</p>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2>Redetext</h2>
+          <div class="row">
+            <label class="btn file">Datei laden (.txt, .md, .docx)
+              <input type="file" id="file" accept=".txt,.md,.text,.docx,text/plain">
+            </label>
+            <button class="btn" id="clearBtn" type="button">Leeren</button>
+          </div>
+        </div>
+        <textarea id="text" spellcheck="false" aria-label="Redetext"></textarea>
+        <div class="legend">
+          <div>Regieanweisungen in <code>[eckigen Klammern]</code> oder <code>((doppelten runden Klammern))</code> erscheinen als <span class="dirSample">[farbige Hinweise]</span> und werden beim Mitlesen übersprungen.</div>
+          <div>Leerzeile = neuer Absatz.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Darstellung</h2>
+        <div class="field">
+          <label for="fs">Schriftgröße <output id="fsOut"></output></label>
+          <input type="range" id="fs" min="24" max="120" step="2">
+        </div>
+        <div class="field">
+          <label for="width">Textbreite <output id="widthOut"></output></label>
+          <input type="range" id="width" min="50" max="96" step="2">
+        </div>
+        <div class="field">
+          <label for="readline">Leselinie von oben <output id="readlineOut"></output></label>
+          <input type="range" id="readline" min="15" max="60" step="1">
+        </div>
+        <div class="field">
+          <label for="dirColor">Farbe der Regieanweisungen</label>
+          <select id="dirColor">
+            <option value="#f5b841">Bernstein</option>
+            <option value="#ff7a6b">Korallenrot</option>
+            <option value="#6fdc9a">Grün</option>
+            <option value="#c49bff">Violett</option>
+            <option value="#5cc8e8">Hellblau</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="mirror"> Spiegeln (für Teleprompter-Glas)</label>
+        <label class="check"><input type="checkbox" id="clockOn"> Uhr mit verstrichener Redezeit anzeigen</label>
+
+        <h2 style="margin-top:6px">Steuerung</h2>
+        <div class="field">
+          <label for="mode">Modus</label>
+          <select id="mode">
+            <option value="voice">Sprachgesteuert (folgt Ihrer Stimme)</option>
+            <option value="fixed">Konstante Geschwindigkeit</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="lang">Sprache</label>
+          <select id="lang">
+            <option value="de-DE">Deutsch (Deutschland)</option>
+            <option value="de-AT">Deutsch (Österreich)</option>
+            <option value="de-CH">Deutsch (Schweiz)</option>
+            <option value="en-US">Englisch (USA)</option>
+            <option value="en-GB">Englisch (UK)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="wpm">Tempo im Konstant-Modus <output id="wpmOut"></output></label>
+          <input type="range" id="wpm" min="60" max="220" step="5">
+        </div>
+        <div id="support"></div>
+        <button class="btn primary big" id="startBtn" type="button">Prompter starten</button>
+        <p class="hint">Tastatur: <code>Leertaste</code> Start/Pause · <code>↑ ↓</code> Zeile · <code>← →</code> Wort · <code>Esc</code> zurück. Auf dem iPad: auf ein Wort tippen, um dort weiterzulesen.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Prompter ============ -->
+<section id="prompter" hidden>
+  <div id="stage">
+    <div id="scroller"></div>
+  </div>
+  <div class="shade top"></div>
+  <div class="shade bot"></div>
+  <div id="marker"></div>
+  <div id="heard" hidden></div>
+  <div id="clock" aria-label="Verstrichene Redezeit">0:00</div>
+  <div id="toast" hidden></div>
+  <div id="bar">
+    <button class="btn" id="backBtn" type="button">← Text</button>
+    <button class="btn" id="micBtn" type="button">▶ Start</button>
+    <button class="btn" id="resetBtn" type="button">Anfang</button>
+    <button class="btn" id="smallerBtn" type="button" aria-label="Schrift kleiner">A−</button>
+    <button class="btn" id="biggerBtn" type="button" aria-label="Schrift größer">A+</button>
+    <button class="btn" id="mirrorBtn" type="button">Spiegeln</button>
+    <button class="btn" id="fullBtn" type="button">Vollbild</button>
+    <div class="stat">
+      <span><i class="dot" id="dot"></i><span id="state">Pause</span></span>
+      <span><b id="wpmLive">–</b> Wörter/min</span>
+      <span><b id="progress">0 %</b></span>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  const SAMPLE = `[Ans Pult treten, Blickkontakt suchen]
+
+Liebe Bürgerinnen und Bürger, liebe Gäste,
+
+ich freue mich sehr, dass Sie heute so zahlreich gekommen sind. [Pause] Ein Jahr voller Veränderungen liegt hinter uns, und vieles davon haben wir gemeinsam angepackt.
+
+((langsamer sprechen))
+
+Wir haben die neue Kita eröffnet, den Radweg bis zum Ortsrand fertiggestellt und das Dorfgemeinschaftshaus saniert. Das war nur möglich, weil so viele von Ihnen mitgeholfen haben.
+
+[Blick in die erste Reihe] Mein besonderer Dank gilt den Ehrenamtlichen in unseren Vereinen und bei der Feuerwehr.
+
+Für das kommende Jahr haben wir uns viel vorgenommen. [Pause] Lassen Sie uns diesen Weg weiter zusammen gehen.
+
+Vielen Dank für Ihre Aufmerksamkeit.
+
+[Applaus abwarten]`;
+
+  // ---------- Einstellungen ----------
+  const DEF = { fs: 56, width: 80, readline: 30, dirColor: "#f5b841", mirror: false, mode: "voice", lang: "de-DE", wpm: 130, clock: true };
+  let S = { ...DEF };
+  const store = {
+    get(k) { try { return localStorage.getItem("tp_" + k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem("tp_" + k, v); } catch {} }
+  };
+  try { Object.assign(S, JSON.parse(store.get("settings") || "{}")); } catch {}
+  $("text").value = store.get("text") ?? SAMPLE;
+
+  const saveSettings = () => store.set("settings", JSON.stringify(S));
+  function applySettings() {
+    const r = document.documentElement.style;
+    r.setProperty("--fs", S.fs + "px");
+    r.setProperty("--width", S.width + "%");
+    r.setProperty("--readline", S.readline + "%");
+    r.setProperty("--dir", S.dirColor);
+    $("fs").value = S.fs; $("fsOut").textContent = S.fs + " px";
+    $("width").value = S.width; $("widthOut").textContent = S.width + " %";
+    $("readline").value = S.readline; $("readlineOut").textContent = S.readline + " %";
+    $("wpm").value = S.wpm; $("wpmOut").textContent = S.wpm + " Wörter/min";
+    $("dirColor").value = S.dirColor; $("mirror").checked = S.mirror;
+    $("mode").value = S.mode; $("lang").value = S.lang;
+    $("stage").classList.toggle("mirror", S.mirror);
+    $("clock").classList.toggle("mirror", S.mirror);
+    $("clockOn").checked = S.clock; $("clock").hidden = !S.clock;
+  }
+  applySettings();
+
+  const bindRange = (id, key) => $(id).addEventListener("input", (e) => { S[key] = +e.target.value; applySettings(); saveSettings(); relayout(); });
+  bindRange("fs", "fs"); bindRange("width", "width"); bindRange("readline", "readline"); bindRange("wpm", "wpm");
+  $("dirColor").addEventListener("change", (e) => { S.dirColor = e.target.value; applySettings(); saveSettings(); });
+  $("mirror").addEventListener("change", (e) => { S.mirror = e.target.checked; applySettings(); saveSettings(); });
+  $("clockOn").addEventListener("change", (e) => { S.clock = e.target.checked; applySettings(); saveSettings(); });
+  $("mode").addEventListener("change", (e) => { S.mode = e.target.value; saveSettings(); showSupport(); });
+  $("lang").addEventListener("change", (e) => { S.lang = e.target.value; saveSettings(); });
+  $("text").addEventListener("input", () => store.set("text", $("text").value));
+  $("clearBtn").addEventListener("click", () => { $("text").value = ""; store.set("text", ""); $("text").focus(); });
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function showSupport() {
+    const el = $("support");
+    if (S.mode === "fixed") { el.className = ""; el.textContent = "Der Text läuft gleichmäßig im eingestellten Tempo."; return; }
+    if (!SR) {
+      el.className = "bad";
+      el.textContent = "Dieser Browser bietet keine Spracherkennung. Bitte Chrome, Edge oder Safari verwenden oder den Konstant-Modus wählen.";
+    } else if (!window.isSecureContext) {
+      el.className = "bad";
+      el.textContent = "Die Spracherkennung braucht eine sichere Verbindung (https). Seite über https öffnen.";
+    } else {
+      el.className = "good";
+      el.textContent = "Spracherkennung verfügbar. Beim Start fragt der Browser nach dem Mikrofon.";
+    }
+  }
+  showSupport();
+
+  // ---------- Datei laden ----------
+  $("file").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      let txt;
+      if (/\.docx$/i.test(f.name)) {
+        await loadMammoth();
+        const res = await window.mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() });
+        txt = res.value;
+      } else {
+        txt = await f.text();
+      }
+      $("text").value = txt.replace(/\r\n?/g, "\n").trim();
+      store.set("text", $("text").value);
+    } catch (err) {
+      $("support").className = "bad";
+      $("support").textContent = "Die Datei konnte nicht gelesen werden. Word-Dateien brauchen eine Internetverbindung; alternativ als .txt speichern.";
+    }
+    e.target.value = "";
+  });
+  function loadMammoth() {
+    if (window.mammoth) return Promise.resolve();
+    return new Promise((ok, fail) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+      s.onload = ok; s.onerror = fail; document.head.appendChild(s);
+    });
+  }
+
+  // ---------- Text aufbereiten ----------
+  const DIR_RE = /\[[^\]]*\]|\(\([\s\S]*?\)\)/g;
+  const norm = (w) => w.toLowerCase().replace(/ß/g, "ss").replace(/[^\p{L}\p{N}]/gu, "");
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  let words = [];   // {el, key}
+  function build(text) {
+    const sc = $("scroller");
+    sc.innerHTML = "";
+    words = [];
+    const paras = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
+    for (const para of paras) {
+      if (!para.trim()) continue;
+      const p = document.createElement("p");
+      if (para.trim().replace(DIR_RE, "").trim() === "") p.className = "dirblock";
+      let html = "", last = 0;
+      const pushText = (t) => {
+        html += t.split(/(\s+)/).map((tok) => {
+          if (!tok) return "";
+          if (/^\s+$/.test(tok)) return tok.includes("\n") ? "<br>" : " ";
+          const key = norm(tok);
+          if (!key) return esc(tok);
+          words.push({ key });
+          return `<span class="w" data-i="${words.length - 1}">${esc(tok)}</span>`;
+        }).join("");
+      };
+      para.replace(DIR_RE, (m, off) => {
+        pushText(para.slice(last, off));
+        html += `<span class="dir">${esc(m)}</span>`;
+        last = off + m.length;
+      });
+      pushText(para.slice(last));
+      p.innerHTML = html;
+      sc.appendChild(p);
+    }
+    sc.querySelectorAll(".w").forEach((el) => { words[+el.dataset.i].el = el; });
+  }
+
+  // ---------- Positions- und Scrolllogik ----------
+  let pos = 0;              // Index des nächsten zu lesenden Wortes
+  let cur = 0, target = 0;  // Scrollposition in px
+  let running = false;
+  let lastT = 0;
+  let advances = [];        // Zeitstempel gelesener Wörter (für WPM)
+  let fixedAcc = 0;
+  let elapsed = 0;          // verstrichene Redezeit in Sekunden (nur während "läuft")
+
+  function fmtTime(sec) {
+    sec = Math.floor(sec);
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+  }
+  let shownSec = -1;
+  function paintClock() {
+    const s = Math.floor(elapsed);
+    if (s !== shownSec) { shownSec = s; $("clock").textContent = fmtTime(s); }
+  }
+
+  function setPos(n, fromSpeech) {
+    n = Math.max(0, Math.min(words.length, n));
+    if (n === pos) return;
+    const now = performance.now();
+    if (fromSpeech && n > pos) for (let i = pos; i < n; i++) advances.push(now);
+    const lo = Math.min(pos, n), hi = Math.max(pos, n);
+    for (let i = Math.max(0, lo); i <= Math.min(hi, words.length - 1); i++) words[i].el.classList.toggle("read", i < n);
+    if (words[pos]) words[pos].el.classList.remove("cur");
+    pos = n;
+    if (words[pos]) words[pos].el.classList.add("cur");
+    $("progress").textContent = words.length ? Math.round((pos / words.length) * 100) + " %" : "0 %";
+    computeTarget();
+  }
+
+  function computeTarget() {
+    const stageH = $("stage").clientHeight;
+    const line = stageH * S.readline / 100;
+    const w = words[Math.min(pos, words.length - 1)];
+    if (!w) { target = -line; return; }
+    const el = w.el;
+    const lineH = el.offsetHeight;
+    const width = $("scroller").clientWidth || 1;
+    // Gleitend innerhalb der Zeile: horizontale Position im Satz fließt in die Scrollhöhe ein
+    const frac = pos >= words.length ? 1 : Math.min(1, el.offsetLeft / width);
+    target = el.offsetTop + frac * lineH * 0.9 - line + lineH * 0.1;
+  }
+
+  function relayout() { if (!$("prompter").hidden) { computeTarget(); cur = target; paint(); } }
+  window.addEventListener("resize", relayout);
+
+  function wpmNow() {
+    const now = performance.now();
+    advances = advances.filter((t) => now - t < 12000);
+    if (advances.length < 3) return 0;
+    const span = Math.max(3000, now - advances[0]);
+    return Math.round(advances.length / (span / 60000));
+  }
+
+  function paint() { $("scroller").style.transform = `translate3d(0, ${-cur}px, 0)`; }
+
+  function tick(t) {
+    const realDt = (t - (lastT || t)) / 1000;
+    const dt = Math.min(0.1, realDt); lastT = t;
+    if (running) { elapsed += Math.min(realDt, 2); paintClock(); }
+    if (running && S.mode === "fixed") {
+      fixedAcc += dt * S.wpm / 60;
+      if (fixedAcc >= 1) { const k = Math.floor(fixedAcc); fixedAcc -= k; setPos(pos + k, true); }
+    }
+    // Weiche Nachführung; Reaktionszeit richtet sich nach dem Sprechtempo
+    const wpm = S.mode === "fixed" ? S.wpm : (wpmNow() || 110);
+    const k = Math.max(1.6, Math.min(6, wpm / 45));
+    const diff = target - cur;
+    cur += Math.abs(diff) < 0.3 ? diff : diff * (1 - Math.exp(-k * dt));
+    paint();
+    const w = wpmNow();
+    $("wpmLive").textContent = running ? (S.mode === "fixed" ? S.wpm : (w || "–")) : "–";
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---------- Abgleich Sprache ↔ Text ----------
+  function lev(a, b) {
+    if (a === b) return 0;
+    const m = a.length, n = b.length; if (!m || !n) return Math.max(m, n);
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const row = [i];
+      for (let j = 1; j <= n; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = row;
+    }
+    return prev[n];
+  }
+  function sim(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const min = Math.min(a.length, b.length);
+    if (min >= 4 && (a.startsWith(b) || b.startsWith(a))) return 0.85;
+    return 1 - lev(a, b) / Math.max(a.length, b.length);
+  }
+  const LOOKAHEAD = 18;
+
+  function align(heard) {
+    if (!heard.length || !words.length) return;
+    const tail = heard.slice(-8);
+    let best = -1, bestScore = 0;
+    const from = Math.max(0, pos - 2), to = Math.min(words.length - 1, pos + LOOKAHEAD);
+    for (let j = from; j <= to; j++) {
+      let score = 0, k = tail.length - 1, i = j, misses = 0;
+      while (k >= 0 && i >= 0 && i >= pos - 12) {
+        const s = sim(tail[k], words[i].key);
+        if (s >= 0.72) { score += s; k--; i--; }
+        else if (misses < 1) { misses++; k--; }   // ein nicht erkanntes Wort tolerieren
+        else break;
+      }
+      if (score === 0) continue;
+      // Sprünge weit nach vorn brauchen mehr Übereinstimmung
+      const jump = j - pos;
+      const eff = score - Math.max(0, jump) * 0.06;
+      const ok = score >= 2 || (jump <= 2 && (words[j].key.length >= 3 || jump <= 0));
+      if (ok && eff > bestScore + 1e-6) { bestScore = eff; best = j; }
+    }
+    if (best >= 0 && best + 1 > pos) setPos(best + 1, true);
+  }
+
+  let rec = null, wantRec = false, finalWords = [];
+  function startRec() {
+    if (!SR) { toast("Dieser Browser bietet keine Spracherkennung. Bitte den Konstant-Modus verwenden."); return false; }
+    rec = new SR();
+    rec.lang = S.lang; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      let interim = [];
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const ws = e.results[i][0].transcript.split(/\s+/).map(norm).filter(Boolean);
+        if (e.results[i].isFinal) { finalWords.push(...ws); finalWords = finalWords.slice(-12); }
+        else interim.push(...ws);
+      }
+      const heard = finalWords.concat(interim);
+      $("heard").hidden = false;
+      $("heard").textContent = "… " + heard.slice(-10).join(" ");
+      align(heard);
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        wantRec = false; stop();
+        toast("Kein Zugriff auf das Mikrofon. Bitte in den Browser-Einstellungen erlauben.");
+      }
+    };
+    rec.onend = () => { if (wantRec) setTimeout(() => { try { rec.start(); } catch {} }, 150); };
+    wantRec = true;
+    try { rec.start(); } catch {}
+    return true;
+  }
+  function stopRec() { wantRec = false; if (rec) { try { rec.stop(); } catch {} } $("heard").hidden = true; }
+
+  function start() {
+    if (running) return;
+    if (S.mode === "voice" && !startRec()) return;
+    running = true; fixedAcc = 0; finalWords = [];
+    $("micBtn").textContent = "❚❚ Pause"; $("micBtn").classList.add("on");
+    $("dot").classList.add("live"); $("clock").classList.add("live");
+    $("state").textContent = S.mode === "voice" ? "Hört zu" : "Läuft";
+    scheduleHide();
+  }
+  function stop() {
+    running = false; stopRec();
+    $("micBtn").textContent = "▶ Start"; $("micBtn").classList.remove("on");
+    $("dot").classList.remove("live"); $("clock").classList.remove("live"); $("state").textContent = "Pause";
+    showBar();
+  }
+
+  let toastTimer;
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 5000); }
+
+  // ---------- Bedienleiste ----------
+  let hideTimer;
+  function showBar() { $("bar").classList.remove("hide"); clearTimeout(hideTimer); if (running) scheduleHide(); }
+  function scheduleHide() { clearTimeout(hideTimer); hideTimer = setTimeout(() => running && $("bar").classList.add("hide"), 3500); }
+  $("prompter").addEventListener("pointermove", showBar);
+
+  let wakeLock = null;
+  async function keepAwake() { try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {} }
+
+  $("startBtn").addEventListener("click", () => {
+    if (!$("text").value.trim()) { $("text").focus(); return; }
+    build($("text").value);
+    $("setup").hidden = true; $("prompter").hidden = false;
+    pos = -1; setPos(0); computeTarget(); cur = target; paint();
+    advances = []; elapsed = 0; paintClock();
+    showBar(); keepAwake();
+  });
+  $("backBtn").addEventListener("click", () => {
+    stop(); $("prompter").hidden = true; $("setup").hidden = false;
+    try { wakeLock?.release(); } catch {}
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  });
+  $("micBtn").addEventListener("click", () => (running ? stop() : start()));
+  $("resetBtn").addEventListener("click", () => { setPos(0); finalWords = []; advances = []; elapsed = 0; paintClock(); });
+  $("smallerBtn").addEventListener("click", () => { S.fs = Math.max(24, S.fs - 4); applySettings(); saveSettings(); relayout(); });
+  $("biggerBtn").addEventListener("click", () => { S.fs = Math.min(120, S.fs + 4); applySettings(); saveSettings(); relayout(); });
+  $("mirrorBtn").addEventListener("click", () => { S.mirror = !S.mirror; applySettings(); saveSettings(); });
+  $("fullBtn").addEventListener("click", () => {
+    const el = document.documentElement;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+  });
+
+  // Tippen auf ein Wort = dort weiterlesen
+  $("scroller").addEventListener("click", (e) => {
+    const w = e.target.closest(".w"); if (!w) { showBar(); return; }
+    setPos(+w.dataset.i); finalWords = [];
+  });
+
+  // Zeilenweise springen
+  function lineJump(dir) {
+    const w = words[Math.min(pos, words.length - 1)]; if (!w) return;
+    const top = w.el.offsetTop;
+    let i = pos;
+    if (dir > 0) { while (i < words.length && words[i].el.offsetTop <= top) i++; }
+    else {
+      while (i > 0 && words[i - 1].el.offsetTop >= top) i--;
+      const prevTop = i > 0 ? words[i - 1].el.offsetTop : top;
+      while (i > 0 && words[i - 1].el.offsetTop >= prevTop) i--;
+    }
+    setPos(i); finalWords = [];
+  }
+
+  // Wischen auf dem iPad
+  let touchY = null;
+  $("stage").addEventListener("touchstart", (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+  $("stage").addEventListener("touchend", (e) => {
+    if (touchY === null) return;
+    const dy = e.changedTouches[0].clientY - touchY; touchY = null;
+    if (Math.abs(dy) > 50) lineJump(dy < 0 ? 1 : -1);
+  });
+  $("stage").addEventListener("wheel", (e) => { e.preventDefault(); if (Math.abs(e.deltaY) > 8) lineJump(e.deltaY > 0 ? 1 : -1); }, { passive: false });
+
+  document.addEventListener("keydown", (e) => {
+    if ($("prompter").hidden) return;
+    if (e.target.closest("button") && (e.key === " " || e.key === "Enter")) { e.target.blur(); }
+    switch (e.key) {
+      case " ": e.preventDefault(); running ? stop() : start(); break;
+      case "ArrowDown": case "PageDown": e.preventDefault(); lineJump(1); break;
+      case "ArrowUp": case "PageUp": e.preventDefault(); lineJump(-1); break;
+      case "ArrowRight": e.preventDefault(); setPos(pos + 1); break;
+      case "ArrowLeft": e.preventDefault(); setPos(pos - 1); break;
+      case "Home": setPos(0); break;
+      case "Escape": if (!document.fullscreenElement) $("backBtn").click(); break;
+      default: return;
+    }
+    showBar();
+  });
+
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("prompter").hidden) keepAwake(); });
+})();
+</script>
+</body>
+</html>
